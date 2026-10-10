@@ -1,5 +1,4 @@
 using System;
-using System.Drawing;
 using UnityEngine;
 
 [RequireComponent(typeof(MeshFilter))]
@@ -36,7 +35,7 @@ public partial class FloatingMesh : MonoBehaviour
         //
         // This calculation process can be called outside of this class,
         // which is useful when testing.
-        calculator.Calculate(scene, out submergedCentroid, out buoyantForce);
+        calculator.Calculate(out submergedCentroid, out buoyantForce);
     }
 
     void Start()

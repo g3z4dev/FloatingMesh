@@ -156,7 +156,7 @@ public class SubmergedPartCalculator
         get { return scene; }
         set { scene = value; }
     }
-    public virtual void Calculate(SimulationScene parameters, out Vector3 submergedCentroid, out Vector3 buoyantForce)
+    public virtual void Calculate(out Vector3 submergedCentroid, out Vector3 buoyantForce)
     {
         UpdateVertexPositions();
         UpdateTriangleLocations();
@@ -172,9 +172,9 @@ public class VolumeBasedSPC : SubmergedPartCalculator
 
     // Calculate buoyant force
     // F_B = rho * V_B * g * (0,1,0)
-    protected Vector3 CalculateForce(SimulationScene parameters, float submergedVolume)
+    protected Vector3 CalculateForce(float submergedVolume)
     {
-        return Vector3.up * parameters.fluid.fluidDensity * submergedVolume * parameters.world.gravity;
+        return Vector3.up * scene.fluid.fluidDensity * submergedVolume * scene.world.gravity;
     }
 }
 
@@ -183,9 +183,9 @@ public class FastSPC : VolumeBasedSPC
     public FastSPC(Mesh mesh, Transform transform) : base(mesh, transform)
     { }
 
-    public override void Calculate(SimulationScene parameters, out Vector3 submergedCentroid, out Vector3 buoyantForce)
+    public override void Calculate(out Vector3 submergedCentroid, out Vector3 buoyantForce)
     {
-        base.Calculate(parameters, out submergedCentroid, out buoyantForce);
+        base.Calculate(out submergedCentroid, out buoyantForce);
 
         float submergedVolume = 0;
 
@@ -209,7 +209,7 @@ public class FastSPC : VolumeBasedSPC
             submergedVolume = 0;
         }
 
-        buoyantForce = CalculateForce(parameters, submergedVolume);
+        buoyantForce = CalculateForce(submergedVolume);
     }
 }
 
@@ -219,9 +219,9 @@ public class ImprovedSPC : VolumeBasedSPC
     public ImprovedSPC(Mesh mesh, Transform transform) : base(mesh, transform)
     { }
 
-    public override void Calculate(SimulationScene parameters, out Vector3 submergedCentroid, out Vector3 buoyantForce)
+    public override void Calculate(out Vector3 submergedCentroid, out Vector3 buoyantForce)
     {
-        base.Calculate(parameters, out transformedSubmergedCentroid, out buoyantForce);
+        base.Calculate(out transformedSubmergedCentroid, out buoyantForce);
 
         float submergedVolume = 0;
 
@@ -249,7 +249,7 @@ public class ImprovedSPC : VolumeBasedSPC
 
         // Transform back the centroid into the local coordinate system
         submergedCentroid = transform.InverseTransformPoint(transformedSubmergedCentroid);
-        buoyantForce = CalculateForce(parameters, submergedVolume);
+        buoyantForce = CalculateForce(submergedVolume);
     }
 }
 
@@ -332,9 +332,9 @@ public class ExactSPC : VolumeBasedSPC
         }
     }
 
-    public override void Calculate(SimulationScene parameters, out Vector3 submergedCentroid, out Vector3 buoyantForce)
+    public override void Calculate(out Vector3 submergedCentroid, out Vector3 buoyantForce)
     {
-        base.Calculate(parameters, out transformedSubmergedCentroid, out buoyantForce);
+        base.Calculate(out transformedSubmergedCentroid, out buoyantForce);
         float submergedVolume = 0;
 
         // The same trick as in improved algorithm.
@@ -366,6 +366,6 @@ public class ExactSPC : VolumeBasedSPC
 
         // Transform back the centroid into the local coordinate system
         submergedCentroid = transform.InverseTransformPoint(transformedSubmergedCentroid);
-        buoyantForce = CalculateForce(parameters, submergedVolume);
+        buoyantForce = CalculateForce(submergedVolume);
     }
 }

@@ -1,3 +1,4 @@
+using NUnit.Framework.Constraints;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
@@ -17,7 +18,7 @@ public class SubmergedPartCalculator
     protected Vector3 centroid;
     protected Vector3[] centroidElements;
 
-    protected float fluidLevel = 0f;
+    protected SimulationScene scene;
 
     // Pre-allocated space for calculations
     // Tetrahedra vertices 
@@ -51,12 +52,12 @@ public class SubmergedPartCalculator
             GetTriangleTransformedVertices(i, out a, out b, out c);
 
             // Triangle is completely BELOW the fluid level
-            if (a.y < fluidLevel && b.y < fluidLevel && c.y < fluidLevel)
+            if (scene.fluid.IsBelow(a, b, c))
             {
                 triangleLocations[i] = TriangleLocation.Below;
             }
             // Triangle is completely ABOVE the fluid level
-            else if (a.y > fluidLevel && b.y > fluidLevel && c.y > fluidLevel)
+            else if (scene.fluid.IsAbove(a,b,c))
             {
                 triangleLocations[i] = TriangleLocation.Above;
             }
@@ -150,28 +151,43 @@ public class SubmergedPartCalculator
     public float Volume { get { return volume; } }
     public Vector3 Centroid { get { return centroid; } }
 
-    public float FluidLevel
+    public SimulationScene SimulationScene
     {
-        get { return fluidLevel; }
-        set { fluidLevel = value; }
+        get { return scene; }
+        set { scene = value; }
     }
-    public virtual void Calculate(out float submergedVolume, out Vector3 submergedCentroid)
+    public virtual void Calculate(SimulationScene parameters, out Vector3 submergedCentroid, out Vector3 buoyantForce)
     {
         UpdateVertexPositions();
         UpdateTriangleLocations();
-        submergedVolume = 0;
         submergedCentroid = Vector3.zero;
+        buoyantForce = Vector3.zero;
     }
 }
 
-public class FastSPC : SubmergedPartCalculator
+public class VolumeBasedSPC : SubmergedPartCalculator
+{
+    public VolumeBasedSPC(Mesh mesh, Transform transform) : base(mesh, transform)
+    { }
+
+    // Calculate buoyant force
+    // F_B = rho * V_B * g * (0,1,0)
+    protected Vector3 CalculateForce(SimulationScene parameters, float submergedVolume)
+    {
+        return Vector3.up * parameters.fluid.fluidDensity * submergedVolume * parameters.world.gravity;
+    }
+}
+
+public class FastSPC : VolumeBasedSPC
 {
     public FastSPC(Mesh mesh, Transform transform) : base(mesh, transform)
     { }
 
-    public override void Calculate(out float submergedVolume, out Vector3 submergedCentroid)
+    public override void Calculate(SimulationScene parameters, out Vector3 submergedCentroid, out Vector3 buoyantForce)
     {
-        base.Calculate(out submergedVolume, out submergedCentroid);
+        base.Calculate(parameters, out submergedCentroid, out buoyantForce);
+
+        float submergedVolume = 0;
 
         // Calculate the contributions of the totally submerged triangles
         // in the local coordinate system. Volume and centroid elements 
@@ -192,23 +208,27 @@ public class FastSPC : SubmergedPartCalculator
         {
             submergedVolume = 0;
         }
+
+        buoyantForce = CalculateForce(parameters, submergedVolume);
     }
 }
 
-public class ImprovedSPC : SubmergedPartCalculator
+public class ImprovedSPC : VolumeBasedSPC
 {
     Vector3 transformedSubmergedCentroid;
     public ImprovedSPC(Mesh mesh, Transform transform) : base(mesh, transform)
     { }
 
-    public override void Calculate(out float submergedVolume, out Vector3 submergedCentroid)
+    public override void Calculate(SimulationScene parameters, out Vector3 submergedCentroid, out Vector3 buoyantForce)
     {
-        base.Calculate(out submergedVolume, out transformedSubmergedCentroid);
+        base.Calculate(parameters, out transformedSubmergedCentroid, out buoyantForce);
+
+        float submergedVolume = 0;
 
         // Transform (local) centroid to world-space
         o = transform.TransformPoint(centroid);
         // Project to the y = fluidLevel plane
-        o.y = fluidLevel;
+        o.y = scene.fluid.GetFluidLevelAt(o.x, o.z);
         // Now o is ON the surface of the fluid!
         // This causes the volume elements to be zero for
         // each triangles ON the fluid surface.
@@ -229,10 +249,11 @@ public class ImprovedSPC : SubmergedPartCalculator
 
         // Transform back the centroid into the local coordinate system
         submergedCentroid = transform.InverseTransformPoint(transformedSubmergedCentroid);
+        buoyantForce = CalculateForce(parameters, submergedVolume);
     }
 }
 
-public class ExactSPC : SubmergedPartCalculator
+public class ExactSPC : VolumeBasedSPC
 {
     Vector3 transformedSubmergedCentroid;
     // Intersection points
@@ -245,12 +266,6 @@ public class ExactSPC : SubmergedPartCalculator
     Vector3 C1, C2;
     public ExactSPC(Mesh mesh, Transform transform) : base(mesh, transform)
     { }
-
-    // The x intersection point of a->b edge and the y = fluidLevel plane 
-    private void FluidSegmentIntersection(float fluidLevel, Vector3 a, Vector3 b, out Vector3 x)
-    {
-        x = a + (b - a) * (fluidLevel - a.y) / (b.y - a.y);
-    }
 
     private void CalculatePartiallySubmergedTriangleContribution(int i, out float V, out Vector3 C)
     {
@@ -265,8 +280,8 @@ public class ExactSPC : SubmergedPartCalculator
         {
             i1 = indices[3 * i + j];
             i2 = indices[3 * i + ((j + 1) % 3)];
-            if (transformedVertices[i1].y >= fluidLevel &&
-                transformedVertices[i2].y < fluidLevel)
+            if (!scene.fluid.IsBelow(transformedVertices[i1]) &&
+                scene.fluid.IsBelow(transformedVertices[i2]))
             {
                 k = j;
                 break;
@@ -296,8 +311,8 @@ public class ExactSPC : SubmergedPartCalculator
         //      b   
         if (c.y >= 0)
         {
-            FluidSegmentIntersection(fluidLevel, a, b, out p);
-            FluidSegmentIntersection(fluidLevel, b, c, out q);
+            scene.fluid.FluidSegmentIntersection(a, b, out p);
+            scene.fluid.FluidSegmentIntersection(b, c, out q);
             CalculateSubmergedTriangleContribution(p, b, q, o, out V, out C);
         }
         // Triangle is facing upwards:
@@ -307,8 +322,8 @@ public class ExactSPC : SubmergedPartCalculator
         //  b       c
         else
         {
-            FluidSegmentIntersection(fluidLevel, a, b, out p);
-            FluidSegmentIntersection(fluidLevel, c, a, out q);
+            scene.fluid.FluidSegmentIntersection(a, b, out p);
+            scene.fluid.FluidSegmentIntersection(c, a, out q);
             // Break quadrilateral into two triangles
             CalculateSubmergedTriangleContribution(p, b, q, o, out V1, out C1);
             CalculateSubmergedTriangleContribution(q, b, c, o, out V2, out C2);
@@ -317,13 +332,14 @@ public class ExactSPC : SubmergedPartCalculator
         }
     }
 
-    public override void Calculate(out float submergedVolume, out Vector3 submergedCentroid)
+    public override void Calculate(SimulationScene parameters, out Vector3 submergedCentroid, out Vector3 buoyantForce)
     {
-        base.Calculate(out submergedVolume, out transformedSubmergedCentroid);
+        base.Calculate(parameters, out transformedSubmergedCentroid, out buoyantForce);
+        float submergedVolume = 0;
 
         // The same trick as in improved algorithm.
         o = transform.TransformPoint(centroid);
-        o.y = fluidLevel;
+        o.y = scene.fluid.GetFluidLevelAt(o.x, o.z);
 
         for (int i = 0; i < triangleCount; i++)
         {
@@ -345,10 +361,11 @@ public class ExactSPC : SubmergedPartCalculator
         }
         if (submergedVolume >= EPSILON)
             transformedSubmergedCentroid /= submergedVolume;
-        else    
+        else
             submergedVolume = 0;
-        
+
         // Transform back the centroid into the local coordinate system
         submergedCentroid = transform.InverseTransformPoint(transformedSubmergedCentroid);
+        buoyantForce = CalculateForce(parameters, submergedVolume);
     }
 }

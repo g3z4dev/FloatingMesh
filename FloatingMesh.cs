@@ -1,3 +1,5 @@
+using System;
+using System.Drawing;
 using UnityEngine;
 
 [RequireComponent(typeof(MeshFilter))]
@@ -9,7 +11,7 @@ public partial class FloatingMesh : MonoBehaviour
 
     Mesh mesh;
     
-    new Rigidbody rigidbody;
+    Rigidbody rigidbody;
 
     [Header("Fluid Settings")]
     public float fluidLevel = 0f;
@@ -17,21 +19,16 @@ public partial class FloatingMesh : MonoBehaviour
     public float fluidDensity = 1f;
     [Header("Floating Body")]
 
-    private float mass;
-    private float volume;
-    private float density;
-    private float gravity;
+    private SimulationScene scene = new();
 
+    Vector3 submergedCentroid;
     Vector3 buoyantForce;
+    Vector3 transformedSubmergedCentroid;
 
     SubmergedPartCalculator calculator;
-    float submergedVolume;
     Vector3 centroid;
-    Vector3 submergedCentroid, transformedSubmergedCentroid;
+    protected const float EPSILON = 1e-5f;
 
-    public float SubmergedVolume { get { return submergedVolume; } }
-    public Vector3 SubmergedCentroid { get { return submergedCentroid; } }
-   
     public void Refresh()
     {
         // In each FixedUpdate cycle, submerged volume and
@@ -39,7 +36,7 @@ public partial class FloatingMesh : MonoBehaviour
         //
         // This calculation process can be called outside of this class,
         // which is useful when testing.
-        calculator.Calculate(out submergedVolume, out submergedCentroid);
+        calculator.Calculate(scene, out submergedCentroid, out buoyantForce);
     }
 
     void Start()
@@ -61,21 +58,19 @@ public partial class FloatingMesh : MonoBehaviour
                 break;
         }
 
-        calculator.FluidLevel = fluidLevel;
-        mass = rigidbody.mass;
-        volume = calculator.Volume; 
-        density = mass / volume;
+        calculator.SimulationScene = scene;
         rigidbody.centerOfMass = calculator.Centroid;
-        gravity = Physics.gravity.magnitude;
+        this.scene.fluid.fluidLevel = fluidLevel;
+        this.scene.fluid.fluidDensity = fluidDensity;
+        this.scene.floatingObject.mass = rigidbody.mass;
+        this.scene.world.gravity = Physics.gravity.magnitude;
     }
 
     private void AddBuoyantForce()
     {
-        if (submergedVolume == 0)
+        if (buoyantForce.magnitude < EPSILON)
             return;
-        // Calculate buoyant force
-        // F_B = rho * V_B * g * (0,1,0)
-        buoyantForce = Vector3.up * fluidDensity * submergedVolume * gravity;
+
         // Add buoyant force with built-in rigidbody method.
         // The reference point of this force is the transformed submerged centroid.
         rigidbody.AddForceAtPosition(buoyantForce, transformedSubmergedCentroid, ForceMode.Force);
@@ -95,4 +90,59 @@ public partial class FloatingMesh : MonoBehaviour
 
         AddBuoyantForce();
     }
+}
+
+public class Fluid
+{
+    public float fluidLevel;
+    public float fluidDensity;
+    public bool IsBelow(Vector3 point)
+    {
+        return fluidLevel > point.y;
+    }
+
+    public bool IsBelow(Vector3 a, Vector3 b, Vector3 c)
+    {
+        return IsBelow(a) && IsBelow(b) && IsBelow(c);
+    }
+
+    public bool IsAbove(Vector3 point)
+    {
+        return fluidLevel < point.y;
+    }
+    public bool IsAbove(Vector3 a, Vector3 b, Vector3 c)
+    {
+        return IsAbove(a) && IsAbove(b) && IsAbove(c);
+    }
+    public bool IsIntersecting(Vector3 a, Vector3 b, Vector3 c)
+    {
+        return !IsBelow(a, b, c) && !IsAbove(a, b, c);
+    }
+    
+    public float GetFluidLevelAt(float x, float z)
+    {
+        return fluidLevel;
+    }
+
+    public void FluidSegmentIntersection(Vector3 a, Vector3 b, out Vector3 x)
+    {
+        x = a + (b - a) * (fluidLevel - a.y) / (b.y - a.y);
+    }
+}
+
+public class FloatingObject
+{
+    public float mass;
+}
+
+public class World
+{
+    public float gravity;
+}
+
+public class SimulationScene
+{
+    public Fluid fluid = new();
+    public FloatingObject floatingObject = new();
+    public World world = new();
 }

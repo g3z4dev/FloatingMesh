@@ -203,7 +203,7 @@ public class SurfaceBasedSPC : SubmergedPartCalculator
     {
         Vector3 e = b - a;
         Vector3 f = c - a;
-        area = e.magnitude * f.magnitude * Mathf.Sin(Vector3.Angle(e, f));
+        area = e.magnitude * f.magnitude * Mathf.Sin(Mathf.Deg2Rad * Vector3.Angle(e, f));
         centroid = (a + b + c) / 3;
         normal = Vector3.Cross(e, f).normalized;
     }

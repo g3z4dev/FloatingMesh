@@ -430,14 +430,17 @@ public class FastSurfaceSPC : SurfaceBasedSPC
     {
         base.Calculate(out submergedCentroid, out buoyantForce);
 
+        int submergedTriangleCount = 0;
+
         for (int i = 0; i < triangleCount; i++)
         {
             if (triangleLocations[i] == TriangleLocation.Below)
             {
                 buoyantForce += CalculateForce(areaElements[i], normalElements[i], centroidElements[i]);
                 submergedCentroid += centroidElements[i];
+                submergedTriangleCount += 1;
             }
         }
-        submergedCentroid /= triangleCount;
+        submergedCentroid /= submergedTriangleCount;
     }
 }

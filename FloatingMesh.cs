@@ -1,12 +1,13 @@
 using System;
+using Unity.VectorGraphics;
 using UnityEngine;
 
 [RequireComponent(typeof(MeshFilter))]
 [RequireComponent(typeof(Rigidbody))]
 public partial class FloatingMesh : MonoBehaviour
 {
-    public enum CalculationProcess { Fast, Improved, Exact };
-    public CalculationProcess calculationProcess = CalculationProcess.Fast;
+    public enum CalculationProcess { FastVolume, ImprovedVolume, ExactVolume, FastSurface };
+    public CalculationProcess calculationProcess = CalculationProcess.FastVolume;
 
     Mesh mesh;
     
@@ -46,14 +47,17 @@ public partial class FloatingMesh : MonoBehaviour
         // Set strategy for submerged volume calculation
         switch (calculationProcess)
         {
-            case CalculationProcess.Fast:
-                calculator = new FastSPC(mesh, transform);
+            case CalculationProcess.FastVolume:
+                calculator = new FastVolumeSPC(mesh, transform);
                 break;
-            case CalculationProcess.Improved:
-                calculator = new ImprovedSPC(mesh, transform);
+            case CalculationProcess.ImprovedVolume:
+                calculator = new ImprovedVolumeSPC(mesh, transform);
                 break;
-            case CalculationProcess.Exact:
-                calculator = new ExactSPC(mesh, transform);
+            case CalculationProcess.ExactVolume:
+                calculator = new ExactVolumeSPC(mesh, transform);
+                break;
+            case CalculationProcess.FastSurface:
+                calculator = new FastSurfaceSPC(mesh, transform);
                 break;
         }
 
@@ -93,8 +97,15 @@ public partial class FloatingMesh : MonoBehaviour
 
 public class Fluid
 {
+    private World world;
     public float fluidLevel;
     public float fluidDensity;
+
+    public Fluid(World world)
+    {
+        this.world = world;
+    }
+
     public bool IsBelow(Vector3 point)
     {
         return fluidLevel > point.y;
@@ -127,6 +138,10 @@ public class Fluid
     {
         x = a + (b - a) * (fluidLevel - a.y) / (b.y - a.y);
     }
+
+    public float GetHydrostaticPressure(Vector3 pos) {
+        return fluidDensity * world.gravity * (fluidLevel - pos.y);
+    }
 }
 
 public class FloatingObject
@@ -141,7 +156,14 @@ public class World
 
 public class SimulationScene
 {
-    public Fluid fluid = new();
-    public FloatingObject floatingObject = new();
-    public World world = new();
+    public World world;
+    public Fluid fluid;
+    public FloatingObject floatingObject;
+
+    public SimulationScene()
+    {
+        world = new();
+        fluid = new(world);
+        floatingObject = new();
+    }
 }

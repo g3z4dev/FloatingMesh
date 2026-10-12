@@ -12,9 +12,6 @@ public class SubmergedPartCalculator
     protected int triangleCount;
     protected enum TriangleLocation { Above = 1, Below = -1, Intersecting = 0 };
     protected TriangleLocation[] triangleLocations;
-
-    protected float volume;
-    protected float[] volumeElements;
     protected Vector3 centroid;
     protected Vector3[] centroidElements;
 
@@ -72,13 +69,7 @@ public class SubmergedPartCalculator
     {
         transform.TransformPoints(vertices, transformedVertices);
     }
-    protected void CalculateSubmergedTriangleContribution(Vector3 a, Vector3 b, Vector3 c, Vector3 o, out float V, out Vector3 C)
-    {
-        // Signed volume of (abco) tetrahedra
-        V = sign * Vector3.Dot(Vector3.Cross(a - o, b - o), c - o) / 6f;
-        // Centroid of (abco) tetrahedra (multiplied by signed volume)
-        C = (V * (a + b + c + o) / 4f);
-    }
+    
 
     // If local scale of the mesh is modified
     // by transform component, we have to use the
@@ -89,6 +80,66 @@ public class SubmergedPartCalculator
         a.x *= transform.localScale.x;
         a.y *= transform.localScale.y;
         a.z *= transform.localScale.z;
+    }
+
+    public SubmergedPartCalculator(Mesh mesh, Transform transform)
+    {
+        this.transform = transform;
+
+        if(!mesh.isReadable)
+        {
+            Debug.LogError("Input mesh is not readable. Please enable the reading/writing ability on the import page.");
+        }
+
+        vertices = mesh.vertices.Clone() as Vector3[];
+        transformedVertices = new Vector3[vertices.Length];
+        transform.TransformPoints(vertices, transformedVertices);
+        indices = mesh.triangles.Clone() as int[];
+        triangleCount = indices.Length / 3;
+
+        triangleLocations = new TriangleLocation[triangleCount];
+
+    }
+
+    public Vector3 Centroid { get { return centroid; } }
+
+    public SimulationScene SimulationScene
+    {
+        get { return scene; }
+        set { scene = value; }
+    }
+    public virtual void Calculate(out Vector3 submergedCentroid, out Vector3 buoyantForce)
+    {
+        UpdateVertexPositions();
+        UpdateTriangleLocations();
+        submergedCentroid = Vector3.zero;
+        buoyantForce = Vector3.zero;
+    }
+}
+
+public class VolumeBasedSPC : SubmergedPartCalculator
+{
+    protected float volume;
+    protected float[] volumeElements;
+    public float Volume { get { return volume; } }
+    public VolumeBasedSPC(Mesh mesh, Transform transform) : base(mesh, transform)
+    {
+        CalculateCharacteristics();
+    }
+
+    // Calculate buoyant force
+    // F_B = rho * V_B * g * (0,1,0)
+    protected Vector3 CalculateForce(float submergedVolume)
+    {
+        return Vector3.up * scene.fluid.fluidDensity * submergedVolume * scene.world.gravity;
+    }
+
+    protected void CalculateSubmergedTriangleContribution(Vector3 a, Vector3 b, Vector3 c, Vector3 o, out float V, out Vector3 C)
+    {
+        // Signed volume of (abco) tetrahedra
+        V = sign * Vector3.Dot(Vector3.Cross(a - o, b - o), c - o) / 6f;
+        // Centroid of (abco) tetrahedra (multiplied by signed volume)
+        C = (V * (a + b + c + o) / 4f);
     }
 
     // Calculating volume and centroid elements for
@@ -113,74 +164,73 @@ public class SubmergedPartCalculator
             centroid += centroidElements[i];
         }
 
-        if(volume < 0)
+        if (volume < 0)
         {
             Debug.LogWarning("Negative volume detected. Trying to change signs of volume elements.");
             sign = -1;
             CalculateCharacteristics();
         }
-        if(volume >= EPSILON)
+        if (volume >= EPSILON)
         {
             centroid /= volume;
-        } else
+        }
+        else
         {
             Debug.LogError("Unable to calculate submerged part. Volume cannot be zero.");
         }
     }
+}
 
-    public SubmergedPartCalculator(Mesh mesh, Transform transform)
+public class SurfaceBasedSPC : SubmergedPartCalculator
+{
+    protected float[] areaElements;
+    protected Vector3[] normalElements;
+    public SurfaceBasedSPC(Mesh mesh, Transform transform) : base(mesh, transform)
     {
-        this.transform = transform;
-
-        if(!mesh.isReadable)
-        {
-            Debug.LogError("Input mesh is not readable. Please enable the reading/writing ability on the import page.");
-        }
-
-        vertices = mesh.vertices.Clone() as Vector3[];
-        transformedVertices = new Vector3[vertices.Length];
-        transform.TransformPoints(vertices, transformedVertices);
-        indices = mesh.triangles.Clone() as int[];
-        triangleCount = indices.Length / 3;
-
-        triangleLocations = new TriangleLocation[triangleCount];
-
         CalculateCharacteristics();
     }
 
-    public float Volume { get { return volume; } }
-    public Vector3 Centroid { get { return centroid; } }
-
-    public SimulationScene SimulationScene
+    // Calculate buoyant force contribution of a discrete wet surface
+    // F_i = p(c) * A_i * \hat{n}
+    // This is the discretization of the integral:
+    // F = -\int\int_(S)p\hat{n}dS
+    protected Vector3 CalculateForce(float area, Vector3 normal, Vector3 centroid)
     {
-        get { return scene; }
-        set { scene = value; }
+        return -scene.fluid.GetHydrostaticPressure(centroid) * area * normal;
     }
-    public virtual void Calculate(out Vector3 submergedCentroid, out Vector3 buoyantForce)
+
+    protected void CalculateSurfaceTriangleCharacteristics(Vector3 a, Vector3 b, Vector3 c, out float area, out Vector3 centroid, out Vector3 normal)
     {
-        UpdateVertexPositions();
-        UpdateTriangleLocations();
-        submergedCentroid = Vector3.zero;
-        buoyantForce = Vector3.zero;
+        Vector3 e = b - a;
+        Vector3 f = c - a;
+        area = e.magnitude * f.magnitude * Mathf.Sin(Vector3.Angle(e, f));
+        centroid = (a + b + c) / 3;
+        normal = Vector3.Cross(e, f).normalized;
+    }
+
+    protected void CalculateCharacteristics()
+    {
+        areaElements = new float[triangleCount];
+        centroidElements = new Vector3[triangleCount];
+        normalElements = new Vector3[triangleCount];
+
+        for(int i = 0; i < triangleCount; i++)
+        {
+            GetTriangleVertices(i, out a, out b, out c);
+            ApplyLocalScale(ref a);
+            ApplyLocalScale(ref b);
+            ApplyLocalScale(ref c);
+            CalculateSurfaceTriangleCharacteristics(a, b, c, out areaElements[i], out centroidElements[i], out normalElements[i]);
+            centroid += centroidElements[i];
+        }
+
+        centroid /= triangleCount;
     }
 }
 
-public class VolumeBasedSPC : SubmergedPartCalculator
+public class FastVolumeSPC : VolumeBasedSPC
 {
-    public VolumeBasedSPC(Mesh mesh, Transform transform) : base(mesh, transform)
-    { }
-
-    // Calculate buoyant force
-    // F_B = rho * V_B * g * (0,1,0)
-    protected Vector3 CalculateForce(float submergedVolume)
-    {
-        return Vector3.up * scene.fluid.fluidDensity * submergedVolume * scene.world.gravity;
-    }
-}
-
-public class FastSPC : VolumeBasedSPC
-{
-    public FastSPC(Mesh mesh, Transform transform) : base(mesh, transform)
+    public FastVolumeSPC(Mesh mesh, Transform transform) : base(mesh, transform)
     { }
 
     public override void Calculate(out Vector3 submergedCentroid, out Vector3 buoyantForce)
@@ -213,10 +263,10 @@ public class FastSPC : VolumeBasedSPC
     }
 }
 
-public class ImprovedSPC : VolumeBasedSPC
+public class ImprovedVolumeSPC : VolumeBasedSPC
 {
     Vector3 transformedSubmergedCentroid;
-    public ImprovedSPC(Mesh mesh, Transform transform) : base(mesh, transform)
+    public ImprovedVolumeSPC(Mesh mesh, Transform transform) : base(mesh, transform)
     { }
 
     public override void Calculate(out Vector3 submergedCentroid, out Vector3 buoyantForce)
@@ -253,7 +303,7 @@ public class ImprovedSPC : VolumeBasedSPC
     }
 }
 
-public class ExactSPC : VolumeBasedSPC
+public class ExactVolumeSPC : VolumeBasedSPC
 {
     Vector3 transformedSubmergedCentroid;
     // Intersection points
@@ -264,7 +314,7 @@ public class ExactSPC : VolumeBasedSPC
     float V1, V2;
     // Submerged centroid parts
     Vector3 C1, C2;
-    public ExactSPC(Mesh mesh, Transform transform) : base(mesh, transform)
+    public ExactVolumeSPC(Mesh mesh, Transform transform) : base(mesh, transform)
     { }
 
     private void CalculatePartiallySubmergedTriangleContribution(int i, out float V, out Vector3 C)
@@ -367,5 +417,27 @@ public class ExactSPC : VolumeBasedSPC
         // Transform back the centroid into the local coordinate system
         submergedCentroid = transform.InverseTransformPoint(transformedSubmergedCentroid);
         buoyantForce = CalculateForce(submergedVolume);
+    }
+}
+
+
+public class FastSurfaceSPC : SurfaceBasedSPC
+{
+    public FastSurfaceSPC(Mesh mesh, Transform transform) : base(mesh, transform)
+    { }
+
+    public override void Calculate(out Vector3 submergedCentroid, out Vector3 buoyantForce)
+    {
+        base.Calculate(out submergedCentroid, out buoyantForce);
+
+        for (int i = 0; i < triangleCount; i++)
+        {
+            if (triangleLocations[i] == TriangleLocation.Below)
+            {
+                buoyantForce += CalculateForce(areaElements[i], normalElements[i], centroidElements[i]);
+                submergedCentroid += centroidElements[i];
+            }
+        }
+        submergedCentroid /= triangleCount;
     }
 }

@@ -21,9 +21,8 @@ public partial class FloatingMesh : MonoBehaviour
 
     private SimulationScene scene = new();
 
-    Vector3 submergedCentroid;
+    Vector3 buoyantTorque;
     Vector3 buoyantForce;
-    Vector3 transformedSubmergedCentroid;
 
     SubmergedPartCalculator calculator;
     Vector3 centroid;
@@ -36,7 +35,7 @@ public partial class FloatingMesh : MonoBehaviour
         //
         // This calculation process can be called outside of this class,
         // which is useful when testing.
-        calculator.Calculate(out submergedCentroid, out buoyantForce);
+        calculator.Calculate(out buoyantTorque, out buoyantForce);
     }
 
     void Start()
@@ -62,7 +61,8 @@ public partial class FloatingMesh : MonoBehaviour
         }
 
         calculator.SimulationScene = scene;
-        rigidbody.centerOfMass = calculator.Centroid;
+        centroid = calculator.Centroid;
+        rigidbody.centerOfMass = centroid;
         this.scene.fluid.fluidLevel = fluidLevel;
         this.scene.fluid.fluidDensity = fluidDensity;
         this.scene.floatingObject.mass = rigidbody.mass;
@@ -76,7 +76,8 @@ public partial class FloatingMesh : MonoBehaviour
 
         // Add buoyant force with built-in rigidbody method.
         // The reference point of this force is the transformed submerged centroid.
-        rigidbody.AddForceAtPosition(buoyantForce, transformedSubmergedCentroid, ForceMode.Force);
+        rigidbody.AddForce(buoyantForce);
+        rigidbody.AddTorque(buoyantTorque);
     }
 
     private void FixedUpdate()
@@ -86,10 +87,6 @@ public partial class FloatingMesh : MonoBehaviour
 
         // Calculate submerged volume and submerged centroid
         Refresh();
-
-        // Transform submerged centroid (from local coordinate system)
-        // to world space
-        transformedSubmergedCentroid = transform.TransformPoint(submergedCentroid);
 
         AddBuoyantForce();
     }

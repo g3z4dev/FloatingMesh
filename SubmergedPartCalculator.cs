@@ -82,6 +82,11 @@ public class SubmergedPartCalculator
         a.z *= transform.localScale.z;
     }
 
+    protected Vector3 CalculateTorque(Vector3 force, Vector3 point)
+    {
+        return Vector3.Cross(point - centroid, force);
+    }
+
     public SubmergedPartCalculator(Mesh mesh, Transform transform)
     {
         this.transform = transform;
@@ -108,11 +113,11 @@ public class SubmergedPartCalculator
         get { return scene; }
         set { scene = value; }
     }
-    public virtual void Calculate(out Vector3 submergedCentroid, out Vector3 buoyantForce)
+    public virtual void Calculate(out Vector3 buoyantTorque, out Vector3 buoyantForce)
     {
         UpdateVertexPositions();
         UpdateTriangleLocations();
-        submergedCentroid = Vector3.zero;
+        buoyantTorque = Vector3.zero;
         buoyantForce = Vector3.zero;
     }
 }
@@ -214,6 +219,9 @@ public class SurfaceBasedSPC : SubmergedPartCalculator
         centroidElements = new Vector3[triangleCount];
         normalElements = new Vector3[triangleCount];
 
+        centroid = Vector3.zero;
+        float volume = 0;
+
         for(int i = 0; i < triangleCount; i++)
         {
             GetTriangleVertices(i, out a, out b, out c);
@@ -221,10 +229,20 @@ public class SurfaceBasedSPC : SubmergedPartCalculator
             ApplyLocalScale(ref b);
             ApplyLocalScale(ref c);
             CalculateSurfaceTriangleCharacteristics(a, b, c, out areaElements[i], out centroidElements[i], out normalElements[i]);
-            centroid += centroidElements[i];
+            // Using Divergence Theorem we can express the volume and the centroid parts without dealing with the volume
+            // This is a discretization of the integrals obtained by the theorem
+            volume += 1f/3f * Vector3.Dot(centroidElements[i], normalElements[i]);
+            centroid += Vector3.Scale(Vector3.Scale(centroidElements[i], centroidElements[i]) / 2, normalElements[i]);
         }
 
-        centroid /= triangleCount;
+        if (volume >= EPSILON)
+        {
+            centroid /= volume;
+        }
+        else
+        {
+            Debug.LogError("Unable to calculate submerged part. Volume cannot be zero.");
+        }
     }
 }
 
@@ -233,11 +251,12 @@ public class FastVolumeSPC : VolumeBasedSPC
     public FastVolumeSPC(Mesh mesh, Transform transform) : base(mesh, transform)
     { }
 
-    public override void Calculate(out Vector3 submergedCentroid, out Vector3 buoyantForce)
+    public override void Calculate(out Vector3 buoyantTorque, out Vector3 buoyantForce)
     {
-        base.Calculate(out submergedCentroid, out buoyantForce);
+        base.Calculate(out buoyantTorque, out buoyantForce);
 
         float submergedVolume = 0;
+        Vector3 submergedCentroid = Vector3.zero;
 
         // Calculate the contributions of the totally submerged triangles
         // in the local coordinate system. Volume and centroid elements 
@@ -260,6 +279,7 @@ public class FastVolumeSPC : VolumeBasedSPC
         }
 
         buoyantForce = CalculateForce(submergedVolume);
+        buoyantTorque = CalculateTorque(buoyantForce, submergedCentroid);
     }
 }
 
@@ -269,10 +289,11 @@ public class ImprovedVolumeSPC : VolumeBasedSPC
     public ImprovedVolumeSPC(Mesh mesh, Transform transform) : base(mesh, transform)
     { }
 
-    public override void Calculate(out Vector3 submergedCentroid, out Vector3 buoyantForce)
+    public override void Calculate(out Vector3 buoyantTorque, out Vector3 buoyantForce)
     {
-        base.Calculate(out transformedSubmergedCentroid, out buoyantForce);
+        base.Calculate(out buoyantTorque, out buoyantForce);
 
+        transformedSubmergedCentroid = Vector3.zero;
         float submergedVolume = 0;
 
         // Transform (local) centroid to world-space
@@ -298,8 +319,9 @@ public class ImprovedVolumeSPC : VolumeBasedSPC
             submergedVolume = 0;
 
         // Transform back the centroid into the local coordinate system
-        submergedCentroid = transform.InverseTransformPoint(transformedSubmergedCentroid);
+        Vector3 submergedCentroid = transform.InverseTransformPoint(transformedSubmergedCentroid);
         buoyantForce = CalculateForce(submergedVolume);
+        buoyantTorque = CalculateTorque(buoyantForce, submergedCentroid);
     }
 }
 
@@ -382,9 +404,11 @@ public class ExactVolumeSPC : VolumeBasedSPC
         }
     }
 
-    public override void Calculate(out Vector3 submergedCentroid, out Vector3 buoyantForce)
+    public override void Calculate(out Vector3 buoyantTorque, out Vector3 buoyantForce)
     {
-        base.Calculate(out transformedSubmergedCentroid, out buoyantForce);
+        base.Calculate(out buoyantTorque, out buoyantForce);
+
+        transformedSubmergedCentroid = Vector3.zero;
         float submergedVolume = 0;
 
         // The same trick as in improved algorithm.
@@ -415,8 +439,9 @@ public class ExactVolumeSPC : VolumeBasedSPC
             submergedVolume = 0;
 
         // Transform back the centroid into the local coordinate system
-        submergedCentroid = transform.InverseTransformPoint(transformedSubmergedCentroid);
+        Vector3 submergedCentroid = transform.InverseTransformPoint(transformedSubmergedCentroid);
         buoyantForce = CalculateForce(submergedVolume);
+        buoyantTorque = CalculateTorque(buoyantForce, submergedCentroid);
     }
 }
 
@@ -426,21 +451,18 @@ public class FastSurfaceSPC : SurfaceBasedSPC
     public FastSurfaceSPC(Mesh mesh, Transform transform) : base(mesh, transform)
     { }
 
-    public override void Calculate(out Vector3 submergedCentroid, out Vector3 buoyantForce)
+    public override void Calculate(out Vector3 buoyantTorque, out Vector3 buoyantForce)
     {
-        base.Calculate(out submergedCentroid, out buoyantForce);
-
-        int submergedTriangleCount = 0;
+        base.Calculate(out buoyantTorque, out buoyantForce);
 
         for (int i = 0; i < triangleCount; i++)
         {
             if (triangleLocations[i] == TriangleLocation.Below)
             {
-                buoyantForce += CalculateForce(areaElements[i], normalElements[i], centroidElements[i]);
-                submergedCentroid += centroidElements[i];
-                submergedTriangleCount += 1;
+                Vector3 force = CalculateForce(areaElements[i], normalElements[i], centroidElements[i]);
+                buoyantForce += force;
+                buoyantTorque += CalculateTorque(force, centroidElements[i]);
             }
         }
-        submergedCentroid /= submergedTriangleCount;
     }
 }

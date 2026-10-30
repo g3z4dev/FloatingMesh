@@ -1,5 +1,6 @@
 using System;
 using Unity.VectorGraphics;
+using Unity.VisualScripting;
 using UnityEngine;
 
 [RequireComponent(typeof(MeshFilter))]
@@ -24,8 +25,7 @@ public partial class FloatingMesh : MonoBehaviour
     Vector3 buoyantTorque;
     Vector3 buoyantForce;
 
-    SubmergedPartCalculator calculator;
-    Vector3 centroid;
+    BuoyantForceCalculator calculator;
     protected const float EPSILON = 1e-5f;
 
     public void Refresh()
@@ -47,22 +47,20 @@ public partial class FloatingMesh : MonoBehaviour
         switch (calculationProcess)
         {
             case CalculationProcess.FastVolume:
-                calculator = new FastVolumeSPC(mesh, transform);
+                calculator = new FastVolumeBFC(mesh, transform, scene);
                 break;
             case CalculationProcess.ImprovedVolume:
-                calculator = new ImprovedVolumeSPC(mesh, transform);
+                calculator = new ImprovedVolumeBFC(mesh, transform, scene);
                 break;
             case CalculationProcess.ExactVolume:
-                calculator = new ExactVolumeSPC(mesh, transform);
+                calculator = new ExactVolumeBFC(mesh, transform, scene);
                 break;
             case CalculationProcess.FastSurface:
-                calculator = new FastSurfaceSPC(mesh, transform);
+                calculator = new FastSurfaceBFC(mesh, transform, scene);
                 break;
         }
 
-        calculator.SimulationScene = scene;
-        centroid = calculator.Centroid;
-        rigidbody.centerOfMass = centroid;
+        rigidbody.centerOfMass = calculator.LocalCentroid;
         this.scene.fluid.fluidLevel = fluidLevel;
         this.scene.fluid.fluidDensity = fluidDensity;
         this.scene.floatingObject.mass = rigidbody.mass;
@@ -90,77 +88,24 @@ public partial class FloatingMesh : MonoBehaviour
 
         AddBuoyantForce();
     }
-}
 
-public class Fluid
-{
-    private World world;
-    public float fluidLevel;
-    public float fluidDensity;
-
-    public Fluid(World world)
+    private void OnDrawGizmos()
     {
-        this.world = world;
-    }
-
-    public bool IsBelow(Vector3 point)
-    {
-        return fluidLevel > point.y;
-    }
-
-    public bool IsBelow(Vector3 a, Vector3 b, Vector3 c)
-    {
-        return IsBelow(a) && IsBelow(b) && IsBelow(c);
-    }
-
-    public bool IsAbove(Vector3 point)
-    {
-        return fluidLevel < point.y;
-    }
-    public bool IsAbove(Vector3 a, Vector3 b, Vector3 c)
-    {
-        return IsAbove(a) && IsAbove(b) && IsAbove(c);
-    }
-    public bool IsIntersecting(Vector3 a, Vector3 b, Vector3 c)
-    {
-        return !IsBelow(a, b, c) && !IsAbove(a, b, c);
-    }
-    
-    public float GetFluidLevelAt(float x, float z)
-    {
-        return fluidLevel;
-    }
-
-    public void FluidSegmentIntersection(Vector3 a, Vector3 b, out Vector3 x)
-    {
-        x = a + (b - a) * (fluidLevel - a.y) / (b.y - a.y);
-    }
-
-    public float GetHydrostaticPressure(Vector3 pos) {
-        return fluidDensity * world.gravity * (fluidLevel - pos.y);
-    }
-}
-
-public class FloatingObject
-{
-    public float mass;
-}
-
-public class World
-{
-    public float gravity;
-}
-
-public class SimulationScene
-{
-    public World world;
-    public Fluid fluid;
-    public FloatingObject floatingObject;
-
-    public SimulationScene()
-    {
-        world = new();
-        fluid = new(world);
-        floatingObject = new();
+        if (calculator == null) return;
+        Gizmos.color = Color.orange;
+        Gizmos.DrawSphere(calculator.MeshData.Centroid, 0.3f);
+        Gizmos.color = Color.green;
+        Vector3 fG = Vector3.down * rigidbody.mass * scene.world.gravity;
+        Gizmos.DrawLine(calculator.MeshData.Centroid, calculator.MeshData.Centroid + buoyantForce + fG);
+        Gizmos.DrawCube(calculator.MeshData.Centroid + buoyantForce + fG, new Vector3(0.2f, 0.2f, 0.2f));
+        Gizmos.color = Color.cyan;
+        Gizmos.DrawLine(calculator.MeshData.Centroid, calculator.MeshData.Centroid + buoyantForce);
+        Gizmos.DrawCube(calculator.MeshData.Centroid + buoyantForce, new Vector3(0.2f, 0.2f, 0.2f));
+        Gizmos.color = Color.yellow;
+        Gizmos.DrawLine(calculator.MeshData.Centroid, calculator.MeshData.Centroid + fG);
+        Gizmos.DrawCube(calculator.MeshData.Centroid + fG, new Vector3(0.2f, 0.2f, 0.2f));
+        Gizmos.color = Color.red;
+        Gizmos.DrawLine(calculator.MeshData.Centroid, calculator.MeshData.Centroid + buoyantTorque);
+        Gizmos.DrawCube(calculator.MeshData.Centroid + buoyantTorque, new Vector3(0.2f, 0.2f, 0.2f));
     }
 }

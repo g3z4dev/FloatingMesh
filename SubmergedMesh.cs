@@ -19,9 +19,11 @@ public abstract class SubmergedMesh
     protected Vector3 untransformedCentroid;
     protected Vector3 transformedCentroid;
     protected enum TriangleLocation { Above = 1, Below = -1, Intersecting = 0 };
+    public enum TriangleOrientation { Upwards = 1, Downwards = -1 };
     protected TriangleLocation[] triangleLocations;
     protected const float EPSILON = 1e-5f;
     protected Vector3 a, b, c;
+    protected int i1, i2, i3, k;
     protected abstract void CalculateCharacteristics();
 
     protected SubmergedMesh(Mesh mesh, Transform transform, SimulationScene scene)
@@ -86,6 +88,88 @@ public abstract class SubmergedMesh
         c = transformedVertices[indices[3 * i + 2]];
     }
 
+    /// <summary>
+    /// Returns not only the triangle vertices but also the intersecting points of the triangle with the water's surface.
+    /// </summary>
+    /// <param name="i">The index of the triangle</param>
+    /// <param name="a">Will be set to the first vertex of the triangle which is not submerged</param>
+    /// <param name="b">Will be set to the second vertex of the triangle which is submerged</param>
+    /// <param name="c">Will be set to the last vertex of the triangle which is either submerged or not</param>
+    /// <param name="p">Will be set to the intersection point on the a-b line segment</param>
+    /// <param name="q">Will be set to the intersection point on the a-c or c-b line segment</param>
+    /// <param name="orientation">Will be set to the type of intersection detected. <br/>
+    /// If it's set to Downwards the submerged part is the p-b-q triangle. <br/>
+    /// If it's set to Upwards the submerged part is p-b-c-q quadrilateral.
+    /// </param>
+    public void GetTriangleVerticesWithIntersectingPoints(int i, out Vector3 a, out Vector3 b, out Vector3 c, out Vector3 p, out Vector3 q, out TriangleOrientation orientation)
+    {
+        a = Vector3.zero;
+        b = Vector3.zero;
+        c = Vector3.zero;
+        p = Vector3.zero;
+        q = Vector3.zero;
+        orientation = TriangleOrientation.Upwards;
+
+        if (!IsIntersecting(i))
+        {
+            Debug.LogError("Tried calculating the intersecting points of a non-intersecting triangle.");
+            return;
+        }
+        // Find the above-to-below edge of the triangle (it is unique).
+        // The k-th vertex is ABOVE the surface,
+        // the (k+1)-th vertex is BELOW the surface
+        k = -1;
+        for (int j = 0; j < 3; j++)
+        {
+            i1 = indices[3 * i + j];
+            i2 = indices[3 * i + ((j + 1) % 3)];
+            if (!scene.fluid.IsBelow(transformedVertices[i1]) &&
+                scene.fluid.IsBelow(transformedVertices[i2]))
+            {
+                k = j;
+                break;
+            }
+        }
+
+        if (k < 0)
+        {
+            Debug.LogWarning("Skipping partially submerged triangle's contribution.");
+            return;
+        }
+        // Cyclic permutation of vertices such that
+        // a->b will be the above-to-below edge.
+        i1 = indices[3 * i + k];
+        i2 = indices[3 * i + ((k + 1) % 3)];
+        i3 = indices[3 * i + ((k + 2) % 3)];
+
+        a = transformedVertices[i1];
+        b = transformedVertices[i2];
+        c = transformedVertices[i3];
+
+        // Triangle is facing downwards:
+        //
+        //  a       c
+        // __ p _ q __________ fluidLevel
+        //      b   
+        if (!scene.fluid.IsBelow(c))
+        {
+            scene.fluid.FluidSegmentIntersection(a, b, out p);
+            scene.fluid.FluidSegmentIntersection(b, c, out q);
+            orientation = TriangleOrientation.Downwards;
+        }
+        // Triangle is facing upwards:
+        //
+        //      a
+        // __ p _ q __________ fluidLevel
+        //  b       c
+        else
+        {
+            scene.fluid.FluidSegmentIntersection(a, b, out p);
+            scene.fluid.FluidSegmentIntersection(c, a, out q);
+            orientation = TriangleOrientation.Upwards;
+        }
+    }
+
     public bool IsBelow(int triangleIndex)
     {
         return triangleLocations[triangleIndex] == TriangleLocation.Below;
@@ -118,14 +202,6 @@ public class SubmergedVolumeMesh : SubmergedMesh
     protected float volume;
     protected float sign = 1;
     protected Vector3 o;
-    // Intersection points
-    Vector3 p, q;
-    // Index containers
-    int i1, i2, i3, k;
-    // Submerged volume parts
-    float V1, V2;
-    // Submerged centroid parts
-    Vector3 C1, C2;
     public SubmergedVolumeMesh(Mesh mesh, Transform transform, SimulationScene scene) : base(mesh, transform, scene)
     {
     }
@@ -176,70 +252,6 @@ public class SubmergedVolumeMesh : SubmergedMesh
     {
         base.UpdateVertexPositions();
         transform.TransformPoints(untransformedTetrahedronCentroidElements, transformedTetrahedronCentroidElements);
-    }
-    public void CalculatePartiallySubmergedTriangleContribution(int i, out float V, out Vector3 C)
-    {
-        V = 0;
-        C = Vector3.zero;
-
-        // Find the above-to-below edge of the triangle (it is unique).
-        // The k-th vertex is ABOVE the surface,
-        // the (k+1)-th vertex is BELOW the surface
-        int k = -1;
-        for (int j = 0; j < 3; j++)
-        {
-            i1 = indices[3 * i + j];
-            i2 = indices[3 * i + ((j + 1) % 3)];
-            if (!scene.fluid.IsBelow(transformedVertices[i1]) &&
-                scene.fluid.IsBelow(transformedVertices[i2]))
-            {
-                k = j;
-                break;
-            }
-        }
-
-        if (k < 0)
-        {
-            Debug.LogWarning("Skipping partially submerged triangle's contribution.");
-            return;
-        }
-        // Cyclic permutation of vertices such that
-        // a->b will be the above-to-below edge.
-        i1 = indices[3 * i + k];
-        i2 = indices[3 * i + ((k + 1) % 3)];
-        i3 = indices[3 * i + ((k + 2) % 3)];
-
-        a = transformedVertices[i1];
-        b = transformedVertices[i2];
-        c = transformedVertices[i3];
-
-
-        // Triangle is facing downwards:
-        //
-        //  a       c
-        // __ p _ q __________ fluidLevel
-        //      b   
-        if (c.y >= 0)
-        {
-            scene.fluid.FluidSegmentIntersection(a, b, out p);
-            scene.fluid.FluidSegmentIntersection(b, c, out q);
-            CalculateSubmergedTriangleContribution(p, b, q, o, out V, out C);
-        }
-        // Triangle is facing upwards:
-        //
-        //      a
-        // __ p _ q __________ fluidLevel
-        //  b       c
-        else
-        {
-            scene.fluid.FluidSegmentIntersection(a, b, out p);
-            scene.fluid.FluidSegmentIntersection(c, a, out q);
-            // Break quadrilateral into two triangles
-            CalculateSubmergedTriangleContribution(p, b, q, o, out V1, out C1);
-            CalculateSubmergedTriangleContribution(q, b, c, o, out V2, out C2);
-            V = V1 + V2;
-            C = C1 + C2;
-        }
     }
 
     public float Volume

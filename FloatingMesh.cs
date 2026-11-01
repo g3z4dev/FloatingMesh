@@ -1,13 +1,14 @@
 using System;
 using Unity.VectorGraphics;
 using Unity.VisualScripting;
+using System.Collections.Generic;
 using UnityEngine;
 
 [RequireComponent(typeof(MeshFilter))]
 [RequireComponent(typeof(Rigidbody))]
 public partial class FloatingMesh : MonoBehaviour
 {
-    public enum CalculationProcess { FastVolume, ImprovedVolume, ExactVolume, FastSurface };
+    public enum CalculationProcess { FastVolume, ImprovedVolume, ExactVolume, FastSurface, ExactSurface };
     public CalculationProcess calculationProcess = CalculationProcess.FastVolume;
 
     Mesh mesh;
@@ -57,6 +58,9 @@ public partial class FloatingMesh : MonoBehaviour
                 break;
             case CalculationProcess.FastSurface:
                 calculator = new FastSurfaceBFC(mesh, transform, scene);
+                break;
+            case CalculationProcess.ExactSurface:
+                calculator = new ExactSurfaceBFC(mesh, transform, scene);
                 break;
         }
 

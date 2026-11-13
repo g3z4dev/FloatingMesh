@@ -3,6 +3,7 @@ using Unity.VectorGraphics;
 using Unity.VisualScripting;
 using System.Collections.Generic;
 using UnityEngine;
+using System.Linq;
 
 [RequireComponent(typeof(MeshFilter))]
 [RequireComponent(typeof(Rigidbody))]
@@ -111,5 +112,50 @@ public partial class FloatingMesh : MonoBehaviour
         Gizmos.color = Color.red;
         Gizmos.DrawLine(calculator.MeshData.Centroid, calculator.MeshData.Centroid + buoyantTorque);
         Gizmos.DrawCube(calculator.MeshData.Centroid + buoyantTorque, new Vector3(0.2f, 0.2f, 0.2f));
+        if(calculator is VolumeBasedBFC c1)
+        {
+            Gizmos.color = Color.magenta;
+            Gizmos.DrawSphere(c1.SubmergedCentroid, 0.3f);
+            List<Vector3> centroids = ((SubmergedVolumeMesh)c1.MeshData).TetrahedronCentroids;
+            Gizmos.color = Color.aquamarine;
+            for (int i = 0; i < centroids.Count; i++)
+            {
+                Gizmos.DrawSphere(centroids[i], 0.1f);
+            }
+        } 
+        if (calculator is ExactSurfaceBFC c2)
+        {
+            for (int i = 0; i < c2.centroids.Count; i++)
+            {
+                Gizmos.color = Color.pink;
+                Gizmos.DrawSphere(c2.centroids[i], 0.05f);
+                Gizmos.color = Color.cyan;
+                Gizmos.DrawLine(c2.centroids[i], c2.centroids[i] + c2.forces[i]);
+                Gizmos.DrawCube(c2.centroids[i] + c2.forces[i], new Vector3(0.05f, 0.05f, 0.05f));
+                Gizmos.color = Color.red;
+                Gizmos.DrawLine(c2.centroids[i], c2.centroids[i] + c2.torques[i]);
+                Gizmos.DrawCube(c2.centroids[i] + c2.torques[i], new Vector3(0.05f, 0.05f, 0.05f));
+            }
+            for (int i = 0; i < c2.intersections.Count; i += 3)
+            {
+                Gizmos.color = Color.limeGreen;
+                Gizmos.DrawLine(c2.intersections[i], c2.intersections[i+1]);
+                Gizmos.DrawLine(c2.intersections[i+1], c2.intersections[i + 2]);
+                Gizmos.DrawLine(c2.intersections[i+2], c2.intersections[i]);
+            }
+        }
+        if (calculator is SurfaceBasedBFC c3)
+        {
+            List<Vector3> normals = ((SubmergedAreaMesh)c3.MeshData).Normals;
+            List<Vector3> centroids = ((SubmergedAreaMesh)c3.MeshData).Centroids;
+            for (int i = 0; i < centroids.Count; i++)
+            {
+                Gizmos.color = Color.aquamarine;
+                Gizmos.DrawSphere(centroids[i], 0.05f);
+                Gizmos.color = Color.magenta;
+                Gizmos.DrawLine(centroids[i], centroids[i] + normals[i]);
+                Gizmos.DrawCube(centroids[i] + normals[i], new Vector3(0.05f, 0.05f, 0.05f));
+            }
+        }
     }
 }

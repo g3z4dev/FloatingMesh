@@ -199,6 +199,10 @@ public class SubmergedVolumeMesh : SubmergedMesh
     protected float[] tetrahedronVolumeElements;
     protected Vector3[] untransformedTetrahedronCentroidElements;
     protected Vector3[] transformedTetrahedronCentroidElements;
+    public List<Vector3> TetrahedronCentroids
+    {
+        get => new(transformedTetrahedronCentroidElements);
+    }
     protected float volume;
     protected float sign = 1;
     protected Vector3 o;
@@ -210,7 +214,7 @@ public class SubmergedVolumeMesh : SubmergedMesh
         // Signed volume of (abco) tetrahedra
         V = sign * Vector3.Dot(Vector3.Cross(a - o, b - o), c - o) / 6f;
         // Centroid of (abco) tetrahedra (multiplied by signed volume)
-        C = (V * (a + b + c + o) / 4f);
+        C = (a + b + c + o) / 4f;
     }
     protected override void CalculateCharacteristics()
     {
@@ -227,7 +231,7 @@ public class SubmergedVolumeMesh : SubmergedMesh
             GetTriangleVertices(i, out a, out b, out c);
             CalculateSubmergedTriangleContribution(a, b, c, o, out tetrahedronVolumeElements[i], out transformedTetrahedronCentroidElements[i]);
             volume += tetrahedronVolumeElements[i];
-            transformedCentroid += transformedTetrahedronCentroidElements[i];
+            transformedCentroid += tetrahedronVolumeElements[i] * transformedTetrahedronCentroidElements[i];
         }
 
         if (volume < 0)
@@ -273,8 +277,16 @@ public class SubmergedAreaMesh : SubmergedMesh
 {
     protected Vector3[] untransformedTriangleCentroidElements;
     protected Vector3[] transformedTriangleCentroidElements;
+    public List<Vector3> Centroids
+    {
+        get => new(transformedTriangleCentroidElements);
+    }
     // The normals are not normalized. They have the same magnitude as the triangle's area.
     protected Vector3[] rotatedTriangleNormalElements;
+    public List<Vector3> Normals
+    {
+        get => new(rotatedTriangleNormalElements);
+    }
     protected Vector3[] unrotatedTriangleNormalElements;
     public SubmergedAreaMesh(Mesh mesh, Transform transform, SimulationScene scene) : base(mesh, transform, scene)
     {

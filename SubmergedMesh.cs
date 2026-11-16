@@ -236,6 +236,7 @@ public class SubmergedVolumeMesh : SubmergedMesh
             Debug.LogWarning("Negative volume detected. Trying to change signs of volume elements.");
             sign = -1;
             CalculateCharacteristics();
+            return;
         }
         if (volume >= EPSILON)
         {
@@ -277,6 +278,7 @@ public class SubmergedAreaMesh : SubmergedMesh
     // The normals are not normalized. They have the same magnitude as the triangle's area.
     protected Vector3[] rotatedTriangleNormalElements;
     protected Vector3[] unrotatedTriangleNormalElements;
+    protected float sign = 1;
     public SubmergedAreaMesh(Mesh mesh, Transform transform, SimulationScene scene) : base(mesh, transform, scene)
     {
     }
@@ -296,6 +298,7 @@ public class SubmergedAreaMesh : SubmergedMesh
 
         transformedCentroid = Vector3.zero;
         float volume = 0;
+        float v = 0;
 
         for (int i = 0; i < triangleCount; i++)
         {
@@ -303,10 +306,18 @@ public class SubmergedAreaMesh : SubmergedMesh
             CalculateSurfaceTriangleCharacteristics(a, b, c, out transformedTriangleCentroidElements[i], out rotatedTriangleNormalElements[i]);
             // Using Divergence Theorem we can express the volume and the centroid parts without dealing with the volume
             // This is a discretization of the integrals obtained by the theorem
-            volume += Vector3.Dot(transformedTriangleCentroidElements[i], rotatedTriangleNormalElements[i]) / 3f;
-            transformedCentroid += Vector3.Scale(Vector3.Scale(transformedTriangleCentroidElements[i], transformedTriangleCentroidElements[i]) / 2f, rotatedTriangleNormalElements[i]);
+            v = Vector3.Dot(a, rotatedTriangleNormalElements[i]) / 3;
+            volume += v;
+            transformedCentroid += v * (a + b + c) / 4;
         }
 
+        if(volume < 0)
+        {
+            Debug.LogWarning("Negative volume detected. Trying to change signs of volume elements.");
+            sign = -1;
+            CalculateCharacteristics();
+            return;
+        }
         if (volume >= EPSILON)
         {
             transformedCentroid /= volume;

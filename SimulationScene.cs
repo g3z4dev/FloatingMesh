@@ -42,7 +42,7 @@ public class Fluid
 
     public bool IsAbove(Vector3 point)
     {
-        return fluidLevel < point.y;
+        return fluidLevel <= point.y;
     }
     public bool IsAbove(Vector3 a, Vector3 b, Vector3 c)
     {
@@ -66,6 +66,19 @@ public class Fluid
     public float GetHydrostaticPressure(Vector3 pos)
     {
         return fluidDensity * world.gravity * (fluidLevel - pos.y);
+    }
+
+    public Vector3 GetTorqueContributionForTriangle(Vector3 a, Vector3 b, Vector3 c, Vector3 com)
+    {
+        Vector3 normal = Vector3.Cross(b - a, c - a);
+        a -= com;
+        b -= com;
+        c -= com;
+        float ay = a.y;
+        float by = b.y;
+        float cy = c.y;
+        return -fluidDensity * world.gravity * Vector3.Cross(normal, (2 * ay + by + cy) * a + (ay + 2 * by + cy) * b + (ay + by + 2 * cy) * c) / 24;
+
     }
 }
 

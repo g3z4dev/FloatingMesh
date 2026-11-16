@@ -115,6 +115,7 @@ public abstract class SubmergedMesh
             Debug.LogError("Tried calculating the intersecting points of a non-intersecting triangle.");
             return;
         }
+
         // Find the above-to-below edge of the triangle (it is unique).
         // The k-th vertex is ABOVE the surface,
         // the (k+1)-th vertex is BELOW the surface
@@ -210,7 +211,7 @@ public class SubmergedVolumeMesh : SubmergedMesh
         // Signed volume of (abco) tetrahedra
         V = sign * Vector3.Dot(Vector3.Cross(a - o, b - o), c - o) / 6f;
         // Centroid of (abco) tetrahedra (multiplied by signed volume)
-        C = (V * (a + b + c + o) / 4f);
+        C = (a + b + c + o) / 4f;
     }
     protected override void CalculateCharacteristics()
     {
@@ -227,7 +228,7 @@ public class SubmergedVolumeMesh : SubmergedMesh
             GetTriangleVertices(i, out a, out b, out c);
             CalculateSubmergedTriangleContribution(a, b, c, o, out tetrahedronVolumeElements[i], out transformedTetrahedronCentroidElements[i]);
             volume += tetrahedronVolumeElements[i];
-            transformedCentroid += transformedTetrahedronCentroidElements[i];
+            transformedCentroid += tetrahedronVolumeElements[i]*transformedTetrahedronCentroidElements[i];
         }
 
         if (volume < 0)

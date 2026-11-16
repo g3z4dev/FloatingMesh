@@ -27,7 +27,7 @@ public abstract class BuoyantForceCalculator
         buoyantTorque = Vector3.zero;
         buoyantForce = Vector3.zero;
     }
-    public Vector3 CalculateTorque(Vector3 force, Vector3 point, Vector3 com)
+    public Vector3 CalculateTorqueAtPoint(Vector3 force, Vector3 point, Vector3 com)
     {
         return Vector3.Cross(point - com, force);
     }
@@ -86,6 +86,17 @@ public class SurfaceBasedBFC : BuoyantForceCalculator
     {
         return -scene.fluid.GetHydrostaticPressure(centroid) * normal;
     }
+
+    protected Vector3 CalculateTorqueForTriangle(Vector3 normal, Vector3 a, Vector3 b, Vector3 c, Vector3 com)
+    {
+        float ap = scene.fluid.GetHydrostaticPressure(a);
+        float bp = scene.fluid.GetHydrostaticPressure(b);
+        float cp = scene.fluid.GetHydrostaticPressure(c);
+        a -= com;
+        b -= com;
+        c -= com;
+        return Vector3.Cross(normal, (2 * ap + bp + cp) * a + (ap + 2 * bp + cp) * b + (ap + bp + 2 * cp) * c) / 12;
+    }
 }
 
 public class FastVolumeBFC : VolumeBasedBFC
@@ -108,7 +119,7 @@ public class FastVolumeBFC : VolumeBasedBFC
             if (Mesh.IsBelow(i))
             {
                 submergedVolume += Mesh.GetVolumeContributionOfTriangle(i);
-                submergedCentroid += Mesh.GetTetrahedronCentroidOfTriangle(i);
+                submergedCentroid += Mesh.GetVolumeContributionOfTriangle(i) * Mesh.GetTetrahedronCentroidOfTriangle(i);
             }
         }
         if (submergedVolume >= EPSILON)
@@ -121,7 +132,7 @@ public class FastVolumeBFC : VolumeBasedBFC
         }
 
         buoyantForce = CalculateForce(submergedVolume);
-        buoyantTorque = CalculateTorque(buoyantForce, submergedCentroid, Mesh.Centroid);
+        buoyantTorque = CalculateTorqueAtPoint(buoyantForce, submergedCentroid, Mesh.Centroid);
     }
 }
 
@@ -154,7 +165,7 @@ public class ImprovedVolumeBFC : VolumeBasedBFC
                 Mesh.GetTriangleVertices(i, out a, out b, out c);
                 Mesh.CalculateSubmergedTriangleContribution(a, b, c, o, out V, out C);
                 submergedVolume += V;
-                submergedCentroid += C;
+                submergedCentroid += V*C;
             }
         }
         if (submergedVolume >= EPSILON)
@@ -164,7 +175,7 @@ public class ImprovedVolumeBFC : VolumeBasedBFC
 
         // Transform back the centroid into the local coordinate system;
         buoyantForce = CalculateForce(submergedVolume);
-        buoyantTorque = CalculateTorque(buoyantForce, submergedCentroid, Mesh.Centroid);
+        buoyantTorque = CalculateTorqueAtPoint(buoyantForce, submergedCentroid, Mesh.Centroid);
     }
 }
 
@@ -197,7 +208,7 @@ public class ExactVolumeBFC : VolumeBasedBFC
                 Mesh.GetTriangleVertices(i, out a, out b, out c);
                 Mesh.CalculateSubmergedTriangleContribution(a, b, c, o, out V, out C);
                 submergedVolume += V;
-                submergedCentroid += C;
+                submergedCentroid += V*C;
             }
             // But we also calculate the contribution of the
             // partially submerged triangles
@@ -208,13 +219,14 @@ public class ExactVolumeBFC : VolumeBasedBFC
                 if(orientation == SubmergedMesh.TriangleOrientation.Downwards)
                 {
                     Mesh.CalculateSubmergedTriangleContribution(p, b, q, o, out V, out C);
+                    C = V * C;
                 } 
                 else
                 {
                     Mesh.CalculateSubmergedTriangleContribution(p, b, q, o, out V1, out C1);
                     Mesh.CalculateSubmergedTriangleContribution(q, b, c, o, out V2, out C2);
                     V = V1 + V2;
-                    C = C1 + C2;
+                    C = V1*C1 + V2*C2;
                 }
                 submergedVolume += V;
                 submergedCentroid += C;
@@ -227,14 +239,14 @@ public class ExactVolumeBFC : VolumeBasedBFC
 
         // Transform back the centroid into the local coordinate system
         buoyantForce = CalculateForce(submergedVolume);
-        buoyantTorque = CalculateTorque(buoyantForce, submergedCentroid, Mesh.Centroid);
+        buoyantTorque = CalculateTorqueAtPoint(buoyantForce, submergedCentroid, Mesh.Centroid);
     }
 }
 
 
 public class FastSurfaceBFC : SurfaceBasedBFC
 {
-    protected Vector3 triangleCentroid, force;
+    protected Vector3 triangleCentroid, force, torque;
     public FastSurfaceBFC(Mesh mesh, Transform transform, SimulationScene scene) : base(mesh, transform, scene)
     { }
 
@@ -246,10 +258,12 @@ public class FastSurfaceBFC : SurfaceBasedBFC
         {
             if (Mesh.IsBelow(i))
             {
+                Mesh.GetTriangleVertices(i, out a, out b, out c);
                 triangleCentroid = Mesh.GetCentroid(i);
                 force = CalculateForce(Mesh.GetNormal(i), triangleCentroid);
+                torque = CalculateTorqueForTriangle(Mesh.GetNormal(i), a, b, c, Mesh.Centroid);
                 buoyantForce += force;
-                buoyantTorque += CalculateTorque(force, triangleCentroid, Mesh.Centroid);
+                buoyantTorque += torque;
             }
         }
     }
@@ -258,7 +272,7 @@ public class FastSurfaceBFC : SurfaceBasedBFC
 
 public class ExactSurfaceBFC : SurfaceBasedBFC
 {
-    protected Vector3 triangleCentroid, force;
+    protected Vector3 triangleCentroid, force, torque;
     protected Vector3 p, q;
     protected Vector3 normal;
     protected SubmergedMesh.TriangleOrientation orientation;
@@ -273,10 +287,13 @@ public class ExactSurfaceBFC : SurfaceBasedBFC
         {
             if (Mesh.IsBelow(i))
             {
+                Mesh.GetTriangleVertices(i, out a, out b, out c);
+                normal = Mesh.GetNormal(i);
                 triangleCentroid = Mesh.GetCentroid(i);
-                force = CalculateForce(Mesh.GetNormal(i), triangleCentroid);
+                force = CalculateForce(normal, triangleCentroid);
+                torque = CalculateTorqueForTriangle(normal, a, b, c, Mesh.Centroid);
                 buoyantForce += force;
-                buoyantTorque += CalculateTorque(force, triangleCentroid, Mesh.Centroid);
+                buoyantTorque += torque;
             } 
             else if (Mesh.IsIntersecting(i))
             {
@@ -287,8 +304,9 @@ public class ExactSurfaceBFC : SurfaceBasedBFC
                     normal = Vector3.Cross(b - p, q - p) / 2;
                     triangleCentroid = (p + b + q) / 3;
                     force = CalculateForce(normal, triangleCentroid);
+                    torque = CalculateTorqueForTriangle(normal, p, b, q, Mesh.Centroid);
                     buoyantForce += force;
-                    buoyantTorque += CalculateTorque(force, triangleCentroid, Mesh.Centroid);
+                    buoyantTorque += torque;
                 }
                 else
                 {
@@ -296,14 +314,16 @@ public class ExactSurfaceBFC : SurfaceBasedBFC
                     normal = Vector3.Cross(b - p, q - p) / 2;
                     triangleCentroid = (p + b + q) / 3;
                     force = CalculateForce(normal, triangleCentroid);
+                    torque = CalculateTorqueForTriangle(normal, p, b, q, Mesh.Centroid);
                     buoyantForce += force;
-                    buoyantTorque += CalculateTorque(force, triangleCentroid, Mesh.Centroid);
+                    buoyantTorque += torque;
 
                     normal = Vector3.Cross(b - q, c - q) / 2;
                     triangleCentroid = (q + b + c) / 3;
                     force = CalculateForce(normal, triangleCentroid);
+                    torque = CalculateTorqueForTriangle(normal, q, b, c, Mesh.Centroid);
                     buoyantForce += force;
-                    buoyantTorque += CalculateTorque(force, triangleCentroid, Mesh.Centroid);
+                    buoyantTorque += torque;
                 }
 
             }
